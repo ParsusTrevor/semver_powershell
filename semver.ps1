@@ -1,14 +1,11 @@
-# Credit: Marcus Andersson
-# https://gist.githubusercontent.com/mckn/4136080/raw/7dc2dbaf24d4c54363ab02ac6d0a079c69e36f23/semver.ps1
-# Adapted for VersionHelper in ASPNET Boilerplate
+# Modified From here: https://gist.githubusercontent.com/mckn/4136080/raw/7dc2dbaf24d4c54363ab02ac6d0a079c69e36f23/semver.ps1
+# 
 function Bump-Version
 {
-	param([string]$part = $(throw "Part is a required parameter."))
-    
-    $assemblyDirectory = "..\Acdhh\Acdhh.Core\"
+	param([string]$part = $(throw "Part is a required parameter."),
+         $version)
 
-	$version = Get-AssemblyInfoVersion -Directory $assemblyDirectory -GlobalAssemblyInfo $false
-	$bumpedVersion = $version.PSObject.Copy();
+	$bumpedVersion = Make-Semver -CopyFrom $version
 
 	switch -wildcard ($part)
 	{
@@ -27,12 +24,7 @@ function Bump-Version
 		throw "Version didn't change due to some error..."
 	}
 
-	Update-AssemblyInfoVersion -Directory $assemblyDirectory -GlobalAssemblyInfo $false -BumpedVersion $bumpedVersion
-
-    return New-Object PSObject -Property @{
-        OldVersion = $version
-        NewVersion = $bumpedVersion
-    }
+	return $bumpedVersion
 }
 
 function Bump-NumericVersion
@@ -48,6 +40,28 @@ function Bump-SpecialVersion
 	throw "Not implemented...."
 }
 
+function Make-Semver
+{
+    param([PSObject] $CopyFrom = $null)
+
+    if ($CopyFrom -ne $null) {
+        $clone = Clone-Object $CopyFrom
+    } 
+    else {
+        $clone = New-Object PSObject -Property @{
+		    Minor = 0
+		    Major = 0
+		    Patch = 0
+		    Build = 0
+	    }
+    }
+
+    # override tostring
+    $clone | add-member scriptmethod tostring { "{0}.{1}.{2}-{3}" -f $this.major,$this.Minor,$this.patch,$this.Build } -force
+
+    return $clone
+}
+
 function Clone-Object
 {
 	param([PSObject] $object = $(throw "Object is a required parameter."))
@@ -58,13 +72,36 @@ function Clone-Object
 	return $clone
 }
 
+function Get-Semver
+{
+    param([string] $version = $(throw "Requires a string to parse"))
+    
+	$versionPattern = '([0-9]+)\.([0-9]+)\.([0-9]+)\-?(.*)?'
+    
+	$major, $minor, $patch, $build = ([regex]$versionPattern).matches($version) |
+										  foreach {$_.Groups } | 
+										  Select-Object -Skip 1
+
+    $obj = New-Object PSObject -Property @{
+		Minor = $minor.Value
+		Major = $major.Value
+		Patch = $patch.Value
+		Build = $build.Value
+	}
+
+    # override tostring
+    $obj | add-member scriptmethod tostring { "{0}.{1}.{2}-{3}" -f $this.major,$this.Minor,$this.patch,$this.Build } -force
+    
+	return $obj
+}
+
 function Get-AssemblyInfoVersion
 {
 	param([string] $directory = $(throw "Directory is a required parameter."),
 		  [bool] $globalAssemblyInfo = $false)
 
-	$fileName = "AppVersionHelper.cs"
-	$versionPattern = 'Version = "([0-9])+\.([0-9])+\.([0-9])+\-?(.*)?"'
+	$fileName = "AssemblyInfo.cs"
+	$versionPattern = 'AssemblyVersion\("([0-9])+\.([0-9])+\.([0-9])+\-?(.*)?"\)'
 
 	if($globalAssemblyInfo)
 	{
@@ -73,7 +110,7 @@ function Get-AssemblyInfoVersion
 
 	$assemblyInfo = Get-ChildItem $directory -Recurse | 
 						Where-Object {$_.Name -eq $fileName} | 
-						Select-Object -First 1A
+						Select-Object -First 1
 
 	if(!$assemblyInfo)
 	{
@@ -89,20 +126,7 @@ function Get-AssemblyInfoVersion
 		throw "Could not find line containing assembly version in assembly info file"
 	}					   
 
-	$major, $minor, $patch, $build = ([regex]$versionPattern).matches($matchedLine) |
-										  foreach {$_.Groups } | 
-										  Select-Object -Skip 1
-
-	$version = New-Object PSObject -Property @{
-		Minor = $minor.Value
-		Major = $major.Value
-		Patch = $patch.Value
-		Build = $build.Value
-	}
-
-	$version | add-member ScriptMethod tostring { '{0}.{1}.{2}' -f $this.major,$this.minor,$this.patch } -Force
-
-	return $version
+    return Get-Semver $matchedLine
 }
 
 function Update-AssemblyInfoVersion
@@ -111,26 +135,31 @@ function Update-AssemblyInfoVersion
 		  [string] $directory = $(throw "Directory is a required parameter."),
 		  [bool] $globalAssemblyInfo = $false)
 
-    $assemblyVersionPattern = 'Version = "([0-9])+\.([0-9])+\.([0-9])+\-?(.*)?"'
-	
+	$assemblyVersionPattern = 'AssemblyVersion\("([0-9])+\.([0-9])+\.([0-9])+\-?(.*)?"\)'
+	$assemblyFileVersionPattern = 'AssemblyFileVersion\("([0-9])+\.([0-9])+\.([0-9])+\-?(.*)?"\)'
+
 	$version = ("{0}.{1}.{2}" -f $bumpedVersion.Major, $bumpedVersion.Minor, $bumpedVersion.Patch)
 	if($bumpedVersion.Build)
 	{
 		$version = "{0}-{1}" -f $version, $bumpedVersion.Build
 	}
 
-	$assemblyVersion = 'Version = "' + $version + '"'
-	#$fileVersion = 'AssemblyFileVersion("' + $version + '")'
+	$assemblyVersion = 'AssemblyVersion("' + $version + '")'
+	$fileVersion = 'AssemblyFileVersion("' + $version + '")'
 
-	$fileName = "AppVersionHelper.cs"
-	
+	$fileName = "AssemblyInfo.cs"
+	if($globalAssemblyInfo)
+	{
+		$fileName = "GlobalAssemblyInfo.cs"
+	}
+
 	Get-ChildItem $directory -Recurse -Filter $fileName | ForEach-Object {
 		$currentFile = $_.FullName
 		$tempFile = ("{0}.tmp" -f $_.FullName)
 
 		Get-Content $currentFile | ForEach-Object {
-			% { $_ -Replace $assemblyVersionPattern, $assemblyVersion }
-			#% { $_ -Replace $assemblyFileVersionPattern, $fileVersion }
+			% { $_ -Replace $assemblyVersionPattern, $assemblyVersion } |
+			% { $_ -Replace $assemblyFileVersionPattern, $fileVersion }
 		} | Set-Content $tempFile
 
 		Remove-Item $currentFile
