@@ -76,7 +76,7 @@ function Get-Semver
 {
     param([string] $version = $(throw "Requires a string to parse"))
     
-	$versionPattern = '([0-9]+)\.([0-9]+)\.([0-9]+)\-?(.*)?'
+	$versionPattern = '([0-9]+)\.([0-9]+)\.([0-9]+)[-\.]?([0-9,\w]*)?'
     
 	$major, $minor, $patch, $build = ([regex]$versionPattern).matches($version) |
 										  foreach {$_.Groups } | 
@@ -101,7 +101,7 @@ function Get-AssemblyInfoVersion
 		  [bool] $globalAssemblyInfo = $false)
 
 	$fileName = "AssemblyInfo.cs"
-	$versionPattern = 'AssemblyVersion\("([0-9])+\.([0-9])+\.([0-9])+\-?(.*)?"\)'
+	$versionPattern = 'AssemblyVersion\("([0-9]+)\.([0-9]+)\.([0-9]+)\-?(.*)?"\)'
 
 	if($globalAssemblyInfo)
 	{
